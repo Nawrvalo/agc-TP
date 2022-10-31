@@ -23,6 +23,15 @@ from collections import Counter
 # https://github.com/briney/nwalign3
 # ftp://ftp.ncbi.nih.gov/blast/matrices/
 import nwalign3 as nw
+import argparse
+import sys
+import os
+import gzip
+import statistics
+from collections import Counter
+# https://github.com/briney/nwalign3
+# ftp://ftp.ncbi.nih.gov/blast/matrices/
+import nwalign3 as nw
 
 __author__ = "Your Name"
 __copyright__ = "Universite Paris Diderot"
@@ -32,6 +41,7 @@ __version__ = "1.0.0"
 __maintainer__ = "Your Name"
 __email__ = "your@email.fr"
 __status__ = "Developpement"
+
 
 
 def isfile(path):
@@ -71,22 +81,63 @@ def get_arguments():
     return parser.parse_args()
 
 def read_fasta(amplicon_file, minseqlen):
-    pass
+    with gzip.open(amplicon_file, "rt") as ampli_file:
+        seq = ""
+        for line in ampli_file:
+            if line.startswith(">"):
+                if len(seq) >= minseqlen:
+                    yield seq
+                seq = ""
+            else:
+                seq += line.strip()
+        yield seq
+
 
 
 def dereplication_fulllength(amplicon_file, minseqlen, mincount):
-    pass
+    dico_seq = {}
+    for seq in read_fasta(amplicon_file, minseqlen):
+        if seq not in dico_seq:
+            dico_seq[seq] = 1
+        else:
+            dico_seq[seq] += 1
+    for seq, seq_count in sorted(dico_seq.items(), key=lambda item: item[1], reverse=True):
+        if seq_count >= mincount:
+            yield [seq, seq_count]
+
 
 def get_identity(alignment_list):
     """Prend en une liste de séquences alignées au format ["SE-QUENCE1", "SE-QUENCE2"]
     Retourne le pourcentage d'identite entre les deux."""
-    pass
+
+    idnum = 0
+    for i in range(len(alignment_list[0])):
+        if alignment_list[0][i] == alignment_list[1][i]:
+            idnum += 1
+    return round(100.0 * idnum / len(alignment_list[0]), 2)
+
 
 def abundance_greedy_clustering(amplicon_file, minseqlen, mincount, chunk_size, kmer_size):
-    pass
+    dereplication = dereplication_fulllength(amplicon_file, minseqlen, mincount)
+    list_OTU = [next(dereplication)]
+    for i in dereplication:
+        flag = True
+        for j in list_OTU:
+            idnum = get_identity(nw.global_align(i[0], j[0], gap_open=-1, gap_extend=-1,
+                                                    matrix=os.path.abspath(
+                                                        os.path.join(os.path.dirname(__file__), "MATCH"))))
+            if idnum > 97.0:
+                flag = False
+        if flag:
+            list_OTU.append(i)
+    return list_OTU
+
 
 def write_OTU(OTU_list, output_file):
-    pass
+    with open(output_file, "w") as out_file:
+        for i in range(len(OTU_list)):
+            out_file.write(f">OTU_{i + 1} occurrence:{OTU_list[i][1]}\n")
+            out_file.write(textwrap.fill(OTU_list[i][0]) + "\n")
 
 #==============================================================
 # Main program
@@ -98,7 +149,8 @@ def main():
     # Get arguments
     args = get_arguments()
     # Votre programme ici
-
+    OTU_list = abundance_greedy_clustering(args.amplicon_file, args.minseqlen, args.mincount, args.chunk_size, args.kmer_size)
+    write_OTU(OTU_list, args.output_file)
 #==============================================================
 # Chimera removal section
 #==============================================================
